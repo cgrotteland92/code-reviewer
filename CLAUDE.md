@@ -1,15 +1,86 @@
+# CLAUDE.md
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
 # AI Code Reviewer
 
 A Streamlit application that uses a multi-agent Claude pipeline to review code across four specialist dimensions: security, bugs, quality, and improvements. Four specialist agents run in parallel, and a coordinator agent synthesizes their findings into an executive summary.
 
 ## Tech Stack
 
-| Component | Technology |
-|---|---|
-| UI | Streamlit |
-| AI | Anthropic Claude (`claude-sonnet-4-6`) |
-| SDK | `anthropic` Python SDK |
-| Config | `python-dotenv` (`.env` file) |
+| Component   | Technology                              |
+| ----------- | --------------------------------------- |
+| UI          | Streamlit                               |
+| AI          | Anthropic Claude (`claude-sonnet-4-6`)  |
+| SDK         | `anthropic` Python SDK                  |
+| Config      | `python-dotenv` (`.env` file)           |
 | Parallelism | `concurrent.futures.ThreadPoolExecutor` |
 
 ## Project Structure
@@ -117,6 +188,7 @@ Edit `_FINDINGS_TOOL` or `_COORDINATOR_TOOL` in `reviewer.py`, then update the c
 ### Running a focused single-agent review
 
 Use the `/project:review-agent` slash command in Claude Code:
+
 ```
 /project:review-agent security Python
 /project:review-agent bugs
@@ -125,6 +197,7 @@ Use the `/project:review-agent` slash command in Claude Code:
 ### Understanding a specific finding type
 
 Use the `/project:explain-finding` slash command:
+
 ```
 /project:explain-finding sql-injection
 /project:explain-finding mutable-default-argument
@@ -136,6 +209,7 @@ Use the `/project:explain-finding` slash command:
 ### agents/
 
 One file per specialist agent. Each file documents:
+
 - **Role** — what the agent is responsible for and what it should NOT report
 - **Focus Areas** — the specific patterns and constructs it checks
 - **Severity Criteria** — domain-specific HIGH/MEDIUM/LOW examples
@@ -148,22 +222,22 @@ Read these files to understand agent behavior before modifying prompts in `revie
 
 Reusable capability documentation referenced by agent files:
 
-| File | Purpose |
-|---|---|
-| `severity-rating.md` | Framework for assigning HIGH/MEDIUM/LOW with decision tests and examples |
-| `code-fix-generation.md` | Format and guidelines for before/after code fix suggestions |
-| `language-rules.md` | Language-specific pitfalls, idioms, and best practices (Python, JS, TS, Java, Go, Rust, SQL, Bash) |
-| `finding-format.md` | Standard format for `severity`, `title`, `description`, `location` fields |
+| File                     | Purpose                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `severity-rating.md`     | Framework for assigning HIGH/MEDIUM/LOW with decision tests and examples                           |
+| `code-fix-generation.md` | Format and guidelines for before/after code fix suggestions                                        |
+| `language-rules.md`      | Language-specific pitfalls, idioms, and best practices (Python, JS, TS, Java, Go, Rust, SQL, Bash) |
+| `finding-format.md`      | Standard format for `severity`, `title`, `description`, `location` fields                          |
 
 ### commands/
 
 Custom slash commands available in Claude Code sessions within this project:
 
-| Command | Purpose |
-|---|---|
-| `/project:review-agent <agent> [lang]` | Run a single specialist agent on the current file |
-| `/project:add-agent <name> <description>` | Scaffold a new specialist agent end-to-end |
-| `/project:explain-finding <type>` | Deep-dive explanation of a finding type with examples |
+| Command                                   | Purpose                                               |
+| ----------------------------------------- | ----------------------------------------------------- |
+| `/project:review-agent <agent> [lang]`    | Run a single specialist agent on the current file     |
+| `/project:add-agent <name> <description>` | Scaffold a new specialist agent end-to-end            |
+| `/project:explain-finding <type>`         | Deep-dive explanation of a finding type with examples |
 
 ## Design Decisions
 
