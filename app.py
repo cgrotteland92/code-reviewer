@@ -1,5 +1,5 @@
 import streamlit as st
-from reviewer import review_code
+from reviewer import review_code, ReviewResult, AgentReport, CoordinatorSummary
 
 LANGUAGES = [
     "Auto-detect",
@@ -18,30 +18,98 @@ LANGUAGES = [
     "Other",
 ]
 
-SECTION_HEADERS = [
-    "🐛 Bugs & Potential Errors",
-    "🔒 Security Vulnerabilities",
-    "📋 Code Quality Issues",
-    "💡 Suggested Improvements",
-]
+SEVERITY_CONFIG = {
+    "HIGH":   {"icon": "🔴", "color": "#c0392b"},
+    "MEDIUM": {"icon": "🟡", "color": "#d68910"},
+    "LOW":    {"icon": "🟢", "color": "#1e8449"},
+}
 
-TAB_LABELS = ["🐛 Bugs", "🔒 Security", "📋 Quality", "💡 Improvements"]
+HEALTH_CONFIG = {
+    "CRITICAL":   {"icon": "🚨", "label": "CRITICAL",   "color": "#c0392b"},
+    "NEEDS_WORK": {"icon": "⚠️", "label": "NEEDS WORK", "color": "#d68910"},
+    "GOOD":       {"icon": "✅", "label": "GOOD",        "color": "#1e8449"},
+    "EXCELLENT":  {"icon": "⭐", "label": "EXCELLENT",   "color": "#1a5276"},
+}
 
 
-def parse_review(raw: str) -> dict[str, str]:
-    sections = {h: [] for h in SECTION_HEADERS}
-    current = None
-    for line in raw.splitlines():
-        matched = False
-        for header in SECTION_HEADERS:
-            if header in line:
-                current = header
-                matched = True
-                break
-        if not matched and current is not None:
-            sections[current].append(line)
-    return {h: "\n".join(lines).strip() for h, lines in sections.items()}
+def _tab_label(report: AgentReport) -> str:
+    total = len(report.findings)
+    high = sum(1 for f in report.findings if f.severity == "HIGH")
+    if total == 0:
+        return f"{report.emoji} {report.agent_name}"
+    if high:
+        return f"{report.emoji} {report.agent_name} ({total} · {high} HIGH)"
+    return f"{report.emoji} {report.agent_name} ({total})"
 
+
+def render_agent_tab(report: AgentReport) -> None:
+    if report.summary:
+        st.caption(report.summary)
+
+    if not report.findings:
+        st.success(f"No {report.agent_name.lower()} findings detected.")
+        return
+
+    for severity in ("HIGH", "MEDIUM", "LOW"):
+        bucket = [f for f in report.findings if f.severity == severity]
+        if not bucket:
+            continue
+        cfg = SEVERITY_CONFIG[severity]
+        st.markdown(
+            f"### {cfg['icon']} {severity} &nbsp; "
+            f"<span style='color:{cfg['color']};font-weight:bold'>{len(bucket)} finding{'s' if len(bucket) != 1 else ''}</span>",
+            unsafe_allow_html=True,
+        )
+        for finding in bucket:
+            with st.expander(finding.title, expanded=(severity == "HIGH")):
+                if finding.location:
+                    st.caption(f"📍 {finding.location}")
+                st.markdown(finding.description)
+        st.write("")
+
+
+def render_summary_tab(coordinator: CoordinatorSummary) -> None:
+    health = HEALTH_CONFIG.get(coordinator.overall_health, HEALTH_CONFIG["NEEDS_WORK"])
+    st.markdown(
+        f"<h2 style='margin-top:0'>{health['icon']} Overall Health: "
+        f"<span style='color:{health['color']}'>{health['label']}</span></h2>",
+        unsafe_allow_html=True,
+    )
+
+    col_issues, col_strengths = st.columns(2)
+
+    with col_issues:
+        st.markdown("#### 🚨 Critical Issues")
+        if coordinator.critical_issues:
+            for issue in coordinator.critical_issues:
+                st.markdown(f"- {issue}")
+        else:
+            st.success("No critical issues identified.")
+
+    with col_strengths:
+        st.markdown("#### ✅ Key Strengths")
+        if coordinator.key_strengths:
+            for strength in coordinator.key_strengths:
+                st.markdown(f"- {strength}")
+        else:
+            st.info("No specific strengths noted.")
+
+    if coordinator.recommended_actions:
+        st.divider()
+        st.markdown("#### 📋 Recommended Actions")
+        actions = sorted(coordinator.recommended_actions, key=lambda x: x.get("priority", 99))
+        for action in actions:
+            st.markdown(f"**{action.get('priority', '·')}.** {action.get('action', '')}")
+
+    if coordinator.narrative:
+        st.divider()
+        st.markdown("#### 📝 Analysis")
+        st.markdown(coordinator.narrative)
+
+
+# ---------------------------------------------------------------------------
+# Page layout
+# ---------------------------------------------------------------------------
 
 st.set_page_config(
     page_title="AI Code Reviewer",
@@ -50,7 +118,10 @@ st.set_page_config(
 )
 
 st.title("🔍 AI Code Reviewer")
-st.caption("Powered by Claude claude-sonnet-4-6 · Paste code below and click **Review**")
+st.caption(
+    "Multi-agent analysis powered by Claude claude-sonnet-4-6 · "
+    "Four specialist agents run in parallel, then a coordinator synthesizes results."
+)
 
 input_col, options_col = st.columns([4, 1])
 
@@ -75,7 +146,7 @@ if review_clicked:
         st.warning("Please paste some code before clicking Review.")
     else:
         lang = "unspecified" if language == "Auto-detect" else language
-        with st.spinner("Analyzing your code…"):
+        with st.spinner("Running 4 specialist agents in parallel — Security · Bugs · Quality · Improvements…"):
             try:
                 result = review_code(code_input, lang)
                 st.session_state["last_review"] = result
@@ -83,16 +154,33 @@ if review_clicked:
                 st.error(str(e))
 
 if "last_review" in st.session_state:
+    result: ReviewResult = st.session_state["last_review"]
+
     st.divider()
-    st.subheader("Review Results")
 
-    parsed = parse_review(st.session_state["last_review"])
-    tabs = st.tabs(TAB_LABELS)
+    # Metrics bar
+    all_findings = [f for r in result.reports for f in r.findings]
+    high_n   = sum(1 for f in all_findings if f.severity == "HIGH")
+    medium_n = sum(1 for f in all_findings if f.severity == "MEDIUM")
+    low_n    = sum(1 for f in all_findings if f.severity == "LOW")
+    health   = HEALTH_CONFIG.get(result.coordinator.overall_health, HEALTH_CONFIG["NEEDS_WORK"])
 
-    for tab, header in zip(tabs, SECTION_HEADERS):
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Total Findings", len(all_findings))
+    m2.metric("🔴 High",   high_n)
+    m3.metric("🟡 Medium", medium_n)
+    m4.metric("🟢 Low",    low_n)
+    m5.metric("Health", f"{health['icon']} {health['label']}")
+
+    st.divider()
+
+    # Agent tabs + summary tab
+    tab_labels = [_tab_label(r) for r in result.reports] + ["🎯 Summary"]
+    tabs = st.tabs(tab_labels)
+
+    for tab, report in zip(tabs[:4], result.reports):
         with tab:
-            content = parsed.get(header, "")
-            if content:
-                st.markdown(content)
-            else:
-                st.info("No issues found in this category.")
+            render_agent_tab(report)
+
+    with tabs[4]:
+        render_summary_tab(result.coordinator)
